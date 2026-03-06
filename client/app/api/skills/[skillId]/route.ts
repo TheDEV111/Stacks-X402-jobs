@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSkill, getSkillInputSchema, SKILL_INPUT_SCHEMAS } from "@/lib/skills-config";
+import { getSkill, SKILL_INPUT_SCHEMAS } from "@/lib/skills-config";
 import { handleX402Payment, paidResponse, type X402RouteConfig } from "@/lib/x402/handler";
 import {
   executeWhaleTracker,
@@ -9,6 +9,9 @@ import {
   executeMemeRadar,
 } from "@/lib/skills/executors";
 import type { SkillId } from "@/types/skill";
+
+// Max request body size (50 KB) to prevent abuse
+const MAX_BODY_SIZE = 50 * 1024;
 
 // ── Executor dispatch ──────────────────────────────────────
 
@@ -26,9 +29,12 @@ function getRouteConfig(skillId: string): X402RouteConfig | null {
   const skill = getSkill(skillId);
   if (!skill) return null;
 
+  const payTo = process.env.SERVER_ADDRESS;
+  if (!payTo) return null; // Fail closed — never accept payments to empty address
+
   return {
     amount: skill.priceMicroSTX.toString(),
-    payTo: process.env.SERVER_ADDRESS || "",
+    payTo,
     network: process.env.NEXT_PUBLIC_NETWORK || "testnet",
     facilitatorUrl:
       process.env.NEXT_PUBLIC_FACILITATOR_URL ||
@@ -89,6 +95,15 @@ async function handleSkillRequest(
   const url = new URL(request.url);
 
   if (request.method === "POST") {
+    // Guard against oversized payloads
+    const contentLength = request.headers.get("content-length");
+    if (contentLength && parseInt(contentLength, 10) > MAX_BODY_SIZE) {
+      return NextResponse.json(
+        { error: "payload_too_large", message: "Request body exceeds maximum size" },
+        { status: 413 }
+      );
+    }
+
     try {
       rawInput = await request.json();
     } catch {
@@ -138,10 +153,11 @@ async function handleSkillRequest(
     );
   } catch (err) {
     console.error(`[${skillId}] Execution error:`, err);
+    // Never leak internal error details to clients
     return NextResponse.json(
       {
         error: "execution_error",
-        message: err instanceof Error ? err.message : "Skill execution failed",
+        message: "Skill execution failed. Please try again.",
       },
       { status: 500 }
     );

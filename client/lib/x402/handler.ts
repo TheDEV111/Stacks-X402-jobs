@@ -175,6 +175,8 @@ export function paidResponse(
     headers: {
       "Content-Type": "application/json",
       [X402_HEADERS.PAYMENT_RESPONSE]: encoded,
+      "X-Content-Type-Options": "nosniff",
+      "Cache-Control": "no-store",
     },
   });
 }
