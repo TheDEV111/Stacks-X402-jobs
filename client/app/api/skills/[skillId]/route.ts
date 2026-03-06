@@ -8,10 +8,14 @@ import {
   executeProfilePro,
   executeMemeRadar,
 } from "@/lib/skills/executors";
+import { createRateLimiter, getClientIp } from "@/lib/rate-limit";
 import type { SkillId } from "@/types/skill";
 
 // Max request body size (50 KB) to prevent abuse
 const MAX_BODY_SIZE = 50 * 1024;
+
+// 20 requests per 60s per IP — these routes cost compute + payment overhead
+const limiter = createRateLimiter("skills", { maxRequests: 20, windowSec: 60 });
 
 // ── Executor dispatch ──────────────────────────────────────
 
@@ -64,6 +68,10 @@ async function handleSkillRequest(
   request: Request,
   { params }: { params: Promise<{ skillId: string }> }
 ) {
+  // 0. Rate limit
+  const rl = limiter.check(getClientIp(request));
+  if (!rl.allowed) return rl.response;
+
   const { skillId } = await params;
 
   // 1. Look up skill

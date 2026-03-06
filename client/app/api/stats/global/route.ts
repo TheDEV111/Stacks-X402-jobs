@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import { getAllSkills, CATEGORIES } from "@/lib/skills-config";
+import { createRateLimiter, getClientIp } from "@/lib/rate-limit";
+
+// 60 requests per 60s per IP — read-only, cacheable
+const limiter = createRateLimiter("stats", { maxRequests: 60, windowSec: 60 });
 
 /**
  * GET /api/stats/global
@@ -8,7 +12,10 @@ import { getAllSkills, CATEGORIES } from "@/lib/skills-config";
  * For the hackathon MVP, stats are derived from the skills config.
  * Post-launch these will be computed from Supabase execution logs.
  */
-export async function GET() {
+export async function GET(request: Request) {
+  const rl = limiter.check(getClientIp(request));
+  if (!rl.allowed) return rl.response;
+
   const skills = getAllSkills();
 
   const totalSkills = skills.length;
