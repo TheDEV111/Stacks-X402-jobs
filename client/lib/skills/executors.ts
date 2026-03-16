@@ -3,8 +3,8 @@
  *
  * Each function runs the actual logic for a skill.
  * For the hackathon MVP, some return real data from Hiro API,
- * and others return curated demo data (OpenAI / social skills
- * will be wired to real APIs post-hackathon).
+ * and others return curated demo data (Gemini Flash / social skills
+ * are wired to the Gemini API via GEMINI_API_KEY).
  */
 
 // ── Whale Tracker ──────────────────────────────────────────
@@ -99,31 +99,25 @@ interface ContentCraftInput {
 export async function executeContentCraft(input: ContentCraftInput) {
   const { text, tone = "professional", maxLength = 500 } = input;
 
-  if (process.env.OPENAI_API_KEY) {
+  if (process.env.GEMINI_API_KEY) {
     try {
-      const res = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-4",
-          messages: [
-            {
-              role: "system",
-              content: `You are a professional content editor. Rewrite the given text in a ${tone} tone. Keep it under ${maxLength} characters. Return only the rewritten text.`,
-            },
-            { role: "user", content: text },
-          ],
-          max_tokens: 300,
-          temperature: 0.7,
-        }),
-      });
+      const prompt = `You are a professional content editor. Rewrite the given text in a ${tone} tone. Keep it under ${maxLength} characters. Return only the rewritten text.\n\nText: ${text}`;
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { maxOutputTokens: 400, temperature: 0.7 },
+          }),
+        }
+      );
 
-      if (!res.ok) throw new Error(`OpenAI: ${res.status}`);
+      if (!res.ok) throw new Error(`Gemini: ${res.status}`);
       const data = await res.json();
-      const rewritten = data.choices?.[0]?.message?.content?.trim() || text;
+      const rewritten =
+        data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || text;
 
       return {
         original: text,
@@ -237,32 +231,29 @@ interface ProfileProInput {
 export async function executeProfilePro(input: ProfileProInput) {
   const { profileUrl, analysisDepth = "standard" } = input;
 
-  if (process.env.OPENAI_API_KEY) {
+  if (process.env.GEMINI_API_KEY) {
     try {
-      const res = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-4",
-          messages: [
-            {
-              role: "system",
-              content: `You are a social media analyst. Analyze the given profile URL and provide a ${analysisDepth} audit. Return JSON with: profile (username, platform), score (0-100), strengths (array), weaknesses (array), suggestions (array). Only return valid JSON.`,
+      const prompt = `You are a social media analyst. Analyze the given profile URL and provide a ${analysisDepth} audit.\nReturn ONLY a valid JSON object with these fields: profile (object with username and platform), score (number 0-100), strengths (string array), weaknesses (string array), suggestions (string array).\n\nProfile URL: ${profileUrl}`;
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+              maxOutputTokens: 600,
+              temperature: 0.7,
+              responseMimeType: "application/json",
             },
-            { role: "user", content: `Analyze this profile: ${profileUrl}` },
-          ],
-          max_tokens: 500,
-          temperature: 0.7,
-          response_format: { type: "json_object" },
-        }),
-      });
+          }),
+        }
+      );
 
-      if (!res.ok) throw new Error(`OpenAI: ${res.status}`);
+      if (!res.ok) throw new Error(`Gemini: ${res.status}`);
       const data = await res.json();
-      const analysis = JSON.parse(data.choices?.[0]?.message?.content || "{}");
+      const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+      const analysis = JSON.parse(raw);
       return { ...analysis, analysis_depth: analysisDepth };
     } catch {
       // Fall through to demo

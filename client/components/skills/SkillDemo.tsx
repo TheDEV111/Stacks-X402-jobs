@@ -6,6 +6,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { PaymentButton } from "@/components/payment/PaymentButton";
 import type { SerializableSkill } from "@/types/skill";
 
@@ -94,7 +101,7 @@ export function SkillDemo({ skill }: SkillDemoProps) {
           </TabsList>
 
           <TabsContent value="input" className="mt-0">
-            <div className="space-y-4 rounded-lg border bg-muted/20 p-4">
+            <div className="space-y-4 rounded-xl border border-border bg-card/60 p-5 backdrop-blur-sm">
               {Object.entries(input).map(([key, value]) => {
                 const options = FIELD_OPTIONS[key];
 
@@ -102,24 +109,27 @@ export function SkillDemo({ skill }: SkillDemoProps) {
                   <div key={key} className="space-y-1.5">
                     <label
                       htmlFor={`field-${key}`}
-                      className="text-xs font-medium uppercase tracking-wide text-muted-foreground"
+                      className="block text-xs font-semibold uppercase tracking-widest text-foreground/70"
                     >
                       {key}
                     </label>
 
                     {options && typeof value === "string" ? (
-                      <select
-                        id={`field-${key}`}
-                        className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+                      <Select
                         value={value}
-                        onChange={(e) => updateField(key, e.target.value)}
+                        onValueChange={(v) => updateField(key, v)}
                       >
-                        {options.map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
+                        <SelectTrigger id={`field-${key}`} className="h-9 w-full bg-background text-foreground border-border focus:ring-primary">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {options.map((option) => (
+                            <SelectItem key={option} value={option}>
+                              {option.charAt(0).toUpperCase() + option.slice(1)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     ) : Array.isArray(value) ? (
                       <Input
                         id={`field-${key}`}
@@ -136,14 +146,15 @@ export function SkillDemo({ skill }: SkillDemoProps) {
                         placeholder="comma,separated,values"
                       />
                     ) : typeof value === "boolean" ? (
-                      <label className="inline-flex items-center gap-2 text-sm">
+                      <label className="inline-flex items-center gap-2 cursor-pointer text-sm text-foreground">
                         <input
                           id={`field-${key}`}
                           type="checkbox"
                           checked={value}
                           onChange={(e) => updateField(key, e.target.checked)}
+                          className="h-4 w-4 rounded border-border accent-primary"
                         />
-                        {value ? "true" : "false"}
+                        <span className="font-medium">{value ? "true" : "false"}</span>
                       </label>
                     ) : typeof value === "number" ? (
                       <Input
@@ -155,7 +166,7 @@ export function SkillDemo({ skill }: SkillDemoProps) {
                     ) : typeof value === "object" && value !== null ? (
                       <textarea
                         id={`field-${key}`}
-                        className="min-h-24 w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs"
+                        className="min-h-24 w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                         value={JSON.stringify(value, null, 2)}
                         onChange={(e) => {
                           try {
