@@ -91,8 +91,11 @@ export async function executeWithPayment<T = unknown>(
 
   const encodedPayload = encodePaymentPayload(payload);
 
+  // Preserve original API semantics: POST when body exists, otherwise GET.
+  const method = body ? "POST" : "GET";
+
   const res = await fetch(endpoint, {
-    method: accept.scheme === "exact" ? "GET" : "POST",
+    method,
     headers: {
       "Content-Type": "application/json",
       [X402_HEADERS.PAYMENT_SIGNATURE]: encodedPayload,

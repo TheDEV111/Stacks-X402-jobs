@@ -8,11 +8,15 @@ import { PaymentStatus } from "@/components/payment/PaymentStatus";
 import { executeSkillWithPayment } from "@/lib/x402/client";
 import { formatSTX } from "@/lib/utils/format";
 import { getExplorerUrl, getFaucetUrl, getNetworkName } from "@/lib/stacks/network";
+import { addExecutionHistory } from "@/lib/execution-history";
 import type { PaymentState } from "@/types/payment";
+import { toast } from "sonner";
 
 interface PaymentButtonProps {
   /** Skill API endpoint, e.g. "/api/skills/whale-tracker" */
   endpoint: string;
+  /** Skill id for analytics/history */
+  skillId: string;
   /** Price in microSTX */
   priceMicroSTX: number;
   /** Optional POST body for the skill */
@@ -23,6 +27,7 @@ interface PaymentButtonProps {
 
 export function PaymentButton({
   endpoint,
+  skillId,
   priceMicroSTX,
   body,
   onResult,
@@ -50,6 +55,24 @@ export function PaymentButton({
       setTxHash(hash);
       setState("success");
       onResult?.(result.data);
+
+      addExecutionHistory({
+        id: crypto.randomUUID(),
+        skillId,
+        endpoint,
+        txHash: hash,
+        priceMicroSTX,
+        status: "success",
+        requestBody: body ?? null,
+        result: result.data,
+        createdAt: Math.floor(Date.now() / 1000),
+      });
+
+      toast.success("Skill executed successfully", {
+        description: hash
+          ? `Tx: ${hash.slice(0, 10)}...${hash.slice(-6)}`
+          : "Payment settled via facilitator",
+      });
     } catch (err) {
       setState("error");
       const msg =
@@ -62,11 +85,29 @@ export function PaymentButton({
         msg.toLowerCase().includes("denied")
       ) {
         setError("Transaction cancelled by user.");
+        toast.error("Transaction cancelled", {
+          description: "Wallet signature request was declined.",
+        });
       } else {
         setError(msg);
+        toast.error("Execution failed", {
+          description: "Could not complete payment and skill execution.",
+        });
       }
+
+      addExecutionHistory({
+        id: crypto.randomUUID(),
+        skillId,
+        endpoint,
+        txHash: null,
+        priceMicroSTX,
+        status: "error",
+        requestBody: body ?? null,
+        result: { error: "execution_failed" },
+        createdAt: Math.floor(Date.now() / 1000),
+      });
     }
-  }, [endpoint, body, onResult]);
+  }, [endpoint, body, onResult, skillId, priceMicroSTX]);
 
   const isProcessing =
     state === "signing" ||
