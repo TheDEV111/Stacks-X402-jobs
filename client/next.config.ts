@@ -27,7 +27,7 @@ const nextConfig: NextConfig = {
     ];
   },
 
-  /** Never expose server-only env vars to client bundles */
+  /** Keep x402-stacks server-only — client.ts uses local helpers instead */
   serverExternalPackages: ["x402-stacks"],
 };
 

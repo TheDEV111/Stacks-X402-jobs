@@ -1,20 +1,70 @@
 "use client";
 
-import {
-  decodePaymentRequired,
-  encodePaymentPayload,
-  decodePaymentResponse,
-  X402_HEADERS,
-} from "x402-stacks";
-import type {
-  PaymentRequiredV2,
-  PaymentPayloadV2,
-  SettlementResponseV2,
-} from "x402-stacks";
 import { request as stacksRequest } from "@stacks/connect";
 import { getNetworkName } from "@/lib/stacks/network";
 
-export type { PaymentRequiredV2, SettlementResponseV2 };
+// ── x402 header names (mirrored from x402-stacks to avoid pulling in server deps) ──
+
+const X402_HEADERS = {
+  PAYMENT_REQUIRED: "payment-required",
+  PAYMENT_SIGNATURE: "payment-signature",
+  PAYMENT_RESPONSE: "payment-response",
+} as const;
+
+// ── x402 types (lightweight copies — no runtime dependency on x402-stacks) ──
+
+export interface PaymentAcceptV2 {
+  scheme: string;
+  network: string;
+  payTo: string;
+  amount: string;
+  asset?: string;
+  extra?: Record<string, unknown>;
+}
+
+export interface PaymentRequiredV2 {
+  x402Version: number;
+  accepts: PaymentAcceptV2[];
+  resource: { url?: string; [k: string]: unknown };
+  [k: string]: unknown;
+}
+
+export interface PaymentPayloadV2 {
+  x402Version: number;
+  resource: PaymentRequiredV2["resource"];
+  accepted: PaymentAcceptV2;
+  payload: { transaction: string; [k: string]: unknown };
+}
+
+export interface SettlementResponseV2 {
+  success: boolean;
+  transaction?: string;
+  [k: string]: unknown;
+}
+
+// ── Browser-safe base64 JSON helpers ──
+
+function decodePaymentRequired(header: string | null): PaymentRequiredV2 | null {
+  if (!header) return null;
+  try {
+    return JSON.parse(atob(header));
+  } catch {
+    return null;
+  }
+}
+
+function encodePaymentPayload(payload: PaymentPayloadV2): string {
+  return btoa(JSON.stringify(payload));
+}
+
+function decodePaymentResponse(header: string | null): SettlementResponseV2 | null {
+  if (!header) return null;
+  try {
+    return JSON.parse(atob(header));
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Step 1: Fetch the 402 payment requirements from a skill endpoint.
