@@ -117,9 +117,24 @@ export async function handleX402Payment(
 
   // Settle via facilitator
   const verifier = new X402PaymentVerifier(config.facilitatorUrl);
-  const settlement = await verifier.settle(paymentPayload, {
-    paymentRequirements,
-  });
+  let settlement: SettlementResponseV2;
+
+  try {
+    settlement = await verifier.settle(paymentPayload, {
+      paymentRequirements,
+    });
+  } catch {
+    return {
+      paid: false,
+      response: new Response(
+        JSON.stringify({
+          error: "facilitator_unavailable",
+          message: "Payment settlement service is temporarily unavailable. Please retry.",
+        }),
+        { status: 503, headers: { "Content-Type": "application/json" } }
+      ),
+    };
+  }
 
   if (!settlement.success) {
     const encoded = Buffer.from(

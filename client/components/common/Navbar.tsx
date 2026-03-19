@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import {
   Sheet,
   SheetContent,
+  SheetDescription,
   SheetHeader,
   SheetTitle,
   SheetTrigger,
@@ -75,6 +76,9 @@ export function Navbar() {
                 <SheetTitle className="flex items-center">
                   <Logo size="sm" />
                 </SheetTitle>
+                <SheetDescription className="sr-only">
+                  Navigation menu
+                </SheetDescription>
               </SheetHeader>
               <nav className="mt-6 flex flex-col gap-1">
                 {NAV_LINKS.map((link) => (

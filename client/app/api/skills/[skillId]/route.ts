@@ -10,6 +10,7 @@ import {
 } from "@/lib/skills/executors";
 import { createRateLimiter, getClientIp } from "@/lib/rate-limit";
 import type { SkillId } from "@/types/skill";
+import { X402_HEADERS } from "x402-stacks";
 
 // Max request body size (50 KB) to prevent abuse
 const MAX_BODY_SIZE = 50 * 1024;
@@ -19,13 +20,13 @@ const limiter = createRateLimiter("skills", { maxRequests: 20, windowSec: 60 });
 
 // ── Executor dispatch ──────────────────────────────────────
 
-const EXECUTORS: Record<SkillId, (input: any) => Promise<any>> = {
+const EXECUTORS = {
   "whale-tracker": executeWhaleTracker,
   "content-craft": executeContentCraft,
   "stacks-scout": executeStacksScout,
   "profile-pro": executeProfilePro,
   "meme-radar": executeMemeRadar,
-};
+} as const;
 
 // ── Helpers ────────────────────────────────────────────────
 
@@ -48,7 +49,7 @@ function getRouteConfig(skillId: string): X402RouteConfig | null {
   };
 }
 
-function parseInput(request: Request, url: URL): any {
+function parseInput(url: URL): Record<string, unknown> {
   // For GET requests, parse query params as input
   const input: Record<string, unknown> = {};
   url.searchParams.forEach((value, key) => {
@@ -60,6 +61,113 @@ function parseInput(request: Request, url: URL): any {
     }
   });
   return input;
+}
+
+async function parseJsonBodyWithLimit(
+  request: Request,
+  maxBytes: number
+): Promise<
+  | { ok: true; data: unknown }
+  | { ok: false; response: Response }
+> {
+  const contentLength = request.headers.get("content-length");
+  if (contentLength && parseInt(contentLength, 10) > maxBytes) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        {
+          error: "payload_too_large",
+          message: "Request body exceeds maximum size",
+        },
+        { status: 413 }
+      ),
+    };
+  }
+
+  if (!request.body) {
+    return { ok: true, data: {} };
+  }
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+
+      total += value.byteLength;
+      if (total > maxBytes) {
+        return {
+          ok: false,
+          response: NextResponse.json(
+            {
+              error: "payload_too_large",
+              message: "Request body exceeds maximum size",
+            },
+            { status: 413 }
+          ),
+        };
+      }
+      chunks.push(value);
+    }
+  } catch {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: "invalid_body", message: "Could not read request body" },
+        { status: 400 }
+      ),
+    };
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  try {
+    const text = new TextDecoder().decode(bytes);
+    return { ok: true, data: text ? JSON.parse(text) : {} };
+  } catch {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: "invalid_body", message: "Request body must be valid JSON" },
+        { status: 400 }
+      ),
+    };
+  }
+}
+
+async function parseRequestInput(
+  request: Request
+): Promise<
+  | { ok: true; data: unknown }
+  | { ok: false; response: Response }
+> {
+  if (request.method === "GET") {
+    return { ok: true, data: parseInput(new URL(request.url)) };
+  }
+
+  if (request.method === "POST") {
+    return parseJsonBodyWithLimit(request, MAX_BODY_SIZE);
+  }
+
+  return {
+    ok: false,
+    response: NextResponse.json(
+      {
+        error: "method_not_allowed",
+        message: `Unsupported method: ${request.method}`,
+      },
+      { status: 405 }
+    ),
+  };
 }
 
 // ── Route handler ──────────────────────────────────────────
@@ -83,6 +191,26 @@ async function handleSkillRequest(
     );
   }
 
+  // Enforce configured HTTP method — but only on paid execution attempts.
+  // The initial discovery request (no payment-signature) may use GET even for
+  // POST skills so the client can retrieve the 402 payment requirements.
+  const hasPaymentSignature = Boolean(
+    request.headers.get(X402_HEADERS.PAYMENT_SIGNATURE)
+  );
+
+  if (hasPaymentSignature && request.method !== skill.method) {
+    return NextResponse.json(
+      {
+        error: "method_not_allowed",
+        message: `Skill \"${skillId}\" only supports ${skill.method}`,
+      },
+      {
+        status: 405,
+        headers: { Allow: skill.method },
+      }
+    );
+  }
+
   // 2. Build x402 config
   const config = getRouteConfig(skillId);
   if (!config || !config.payTo) {
@@ -92,56 +220,44 @@ async function handleSkillRequest(
     );
   }
 
-  // 3. Check payment
+  // 3. If this is a paid execution attempt, validate input first to avoid charging invalid requests.
+  let validatedInput: unknown = {};
+
+  if (hasPaymentSignature) {
+    const parsedInput = await parseRequestInput(request);
+    if (!parsedInput.ok) {
+      return parsedInput.response;
+    }
+
+    const schema = SKILL_INPUT_SCHEMAS[skillId as SkillId];
+    const parsed = schema.safeParse(parsedInput.data);
+    if (!parsed.success) {
+      return NextResponse.json(
+        {
+          error: "validation_error",
+          message: "Invalid input parameters",
+          issues: parsed.error.issues.map((i) => ({
+            path: i.path.join("."),
+            message: i.message,
+          })),
+        },
+        { status: 422 }
+      );
+    }
+
+    validatedInput = parsed.data;
+  }
+
+  // 4. Check payment (returns 402 for discovery requests without payment-signature).
   const paymentResult = await handleX402Payment(request, config);
   if (!paymentResult.paid) {
     return paymentResult.response;
   }
 
-  // 4. Parse & validate input
-  let rawInput: any;
-  const url = new URL(request.url);
-
-  if (request.method === "POST") {
-    // Guard against oversized payloads
-    const contentLength = request.headers.get("content-length");
-    if (contentLength && parseInt(contentLength, 10) > MAX_BODY_SIZE) {
-      return NextResponse.json(
-        { error: "payload_too_large", message: "Request body exceeds maximum size" },
-        { status: 413 }
-      );
-    }
-
-    try {
-      rawInput = await request.json();
-    } catch {
-      return NextResponse.json(
-        { error: "invalid_body", message: "Request body must be valid JSON" },
-        { status: 400 }
-      );
-    }
-  } else {
-    rawInput = parseInput(request, url);
-  }
-
-  const schema = SKILL_INPUT_SCHEMAS[skillId as SkillId];
-  const parsed = schema.safeParse(rawInput);
-  if (!parsed.success) {
-    return NextResponse.json(
-      {
-        error: "validation_error",
-        message: "Invalid input parameters",
-        issues: parsed.error.issues.map((i) => ({
-          path: i.path.join("."),
-          message: i.message,
-        })),
-      },
-      { status: 422 }
-    );
-  }
-
   // 5. Execute skill
-  const executor = EXECUTORS[skillId as SkillId];
+  const executor = EXECUTORS[skillId as SkillId] as (
+    input: unknown
+  ) => Promise<unknown>;
   if (!executor) {
     return NextResponse.json(
       { error: "not_implemented", message: `Executor for "${skillId}" not found` },
@@ -150,7 +266,7 @@ async function handleSkillRequest(
   }
 
   try {
-    const result = await executor(parsed.data);
+    const result = await executor(validatedInput);
     return paidResponse(
       {
         skill: skillId,

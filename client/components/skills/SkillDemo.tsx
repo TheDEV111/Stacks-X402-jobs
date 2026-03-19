@@ -65,9 +65,15 @@ function JsonBlock({ data, label }: { data: unknown; label: string }) {
 
 export function SkillDemo({ skill }: SkillDemoProps) {
   const [result, setResult] = useState<unknown>(null);
+  const [activeTab, setActiveTab] = useState("input");
   const [input, setInput] = useState<Record<string, unknown>>(
     (skill.exampleInput as Record<string, unknown>) ?? {}
   );
+
+  const handleResult = (data: unknown) => {
+    setResult(data);
+    setActiveTab("output");
+  };
 
   const updateField = (key: string, value: unknown) => {
     setInput((prev) => ({ ...prev, [key]: value }));
@@ -94,7 +100,7 @@ export function SkillDemo({ skill }: SkillDemoProps) {
         </div>
       </CardHeader>
       <CardContent>
-        <Tabs defaultValue="input">
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="mb-4">
             <TabsTrigger value="input">Input Form</TabsTrigger>
             <TabsTrigger value="output">Example Output</TabsTrigger>
@@ -206,7 +212,7 @@ export function SkillDemo({ skill }: SkillDemoProps) {
             endpoint={endpointWithQuery}
             priceMicroSTX={skill.priceMicroSTX}
             body={skill.method === "POST" ? input : undefined}
-            onResult={setResult}
+            onResult={handleResult}
           />
         </div>
         <p className="text-xs text-center text-muted-foreground mt-2">

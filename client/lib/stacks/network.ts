@@ -3,7 +3,10 @@ import { STACKS_MAINNET, STACKS_TESTNET } from "@stacks/network";
 export type StacksNetworkName = "mainnet" | "testnet";
 
 export function getNetworkName(): StacksNetworkName {
-  return (process.env.NEXT_PUBLIC_NETWORK as StacksNetworkName) || "testnet";
+  const configured = process.env.NEXT_PUBLIC_NETWORK;
+  return configured === "mainnet" || configured === "testnet"
+    ? configured
+    : "testnet";
 }
 
 export function getNetwork() {

@@ -69,11 +69,13 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       const res = await fetch(
         `${getHiroApiUrl()}/extended/v1/address/${address}/stx`
       );
-      if (!res.ok) throw new Error("Failed to fetch balance");
+      if (!res.ok) {
+        throw new Error(`Balance fetch returned ${res.status}`);
+      }
       const data = await res.json();
       setBalanceMicroSTX(Number(data.balance));
-    } catch {
-      // Silently ignore — balance will show as null / "—"
+    } catch (err) {
+      console.warn("[WalletProvider] Balance fetch failed for", address, err);
       setBalanceMicroSTX(null);
     }
   }, [address]);
@@ -81,6 +83,13 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     refreshBalance();
   }, [refreshBalance]);
+
+  // Refresh balance periodically while connected (every 30 s)
+  useEffect(() => {
+    if (!address) return;
+    const id = setInterval(refreshBalance, 30_000);
+    return () => clearInterval(id);
+  }, [address, refreshBalance]);
 
   // ── Connect ──────────────────────────────────────────────
 
@@ -91,10 +100,15 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         forceWalletSelect: true,
       });
 
-      // Find the Stacks address entry
-      const stxEntry = response.addresses.find(
-        (a) => a.symbol === "STX"
-      );
+      // Find the Stacks address — check symbol (case-insensitive) then
+      // fall back to address prefix (SP for mainnet, ST for testnet).
+      const stxEntry =
+        response.addresses.find(
+          (a) => a.symbol?.toUpperCase() === "STX"
+        ) ??
+        response.addresses.find(
+          (a) => a.address.startsWith("SP") || a.address.startsWith("ST")
+        );
       const addr = stxEntry?.address ?? response.addresses[0]?.address;
 
       if (addr) {

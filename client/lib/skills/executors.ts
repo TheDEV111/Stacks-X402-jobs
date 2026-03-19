@@ -3,8 +3,8 @@
  *
  * Each function runs the actual logic for a skill.
  * For the hackathon MVP, some return real data from Hiro API,
- * and others return curated demo data (Gemini Flash / social skills
- * are wired to the Gemini API via GEMINI_API_KEY).
+ * and others return curated demo data (OpenAI GPT-4 / social skills
+ * are wired via OPENAI_API_KEY).
  */
 
 // ── Whale Tracker ──────────────────────────────────────────
@@ -13,6 +13,24 @@ interface WhaleTrackerInput {
   timeframe?: string;
   minAmount?: number;
   limit?: number;
+}
+
+interface HiroTokenTransfer {
+  amount?: string;
+  recipient_address?: string;
+}
+
+interface HiroTx {
+  tx_id: string;
+  token_transfer?: HiroTokenTransfer;
+  sender_address?: string;
+  burn_block_time?: number;
+  block_height?: number;
+}
+
+interface HiroTxListResponse {
+  total?: number;
+  results?: HiroTx[];
 }
 
 export async function executeWhaleTracker(input: WhaleTrackerInput) {
@@ -37,15 +55,15 @@ export async function executeWhaleTracker(input: WhaleTrackerInput) {
     );
 
     if (!res.ok) throw new Error(`Hiro API: ${res.status}`);
-    const data = await res.json();
+    const data = (await res.json()) as HiroTxListResponse;
 
     const whaleMoves = (data.results || [])
-      .filter((tx: any) => {
+      .filter((tx) => {
         const amount = Number(tx.token_transfer?.amount || 0);
         return amount >= whaleThreshold;
       })
       .slice(0, limit)
-      .map((tx: any) => ({
+      .map((tx) => ({
         tx_id: tx.tx_id,
         amount: tx.token_transfer?.amount || "0",
         from: tx.sender_address,
@@ -55,7 +73,7 @@ export async function executeWhaleTracker(input: WhaleTrackerInput) {
       }));
 
     const totalVolume = whaleMoves.reduce(
-      (sum: number, m: any) => sum + Number(m.amount),
+      (sum: number, m) => sum + Number(m.amount),
       0
     );
 
@@ -66,7 +84,7 @@ export async function executeWhaleTracker(input: WhaleTrackerInput) {
       timeframe,
       threshold_micro_stx: whaleThreshold,
     };
-  } catch (err) {
+  } catch {
     // Fallback to demo data if API fails
     return {
       whale_moves: [
@@ -99,25 +117,31 @@ interface ContentCraftInput {
 export async function executeContentCraft(input: ContentCraftInput) {
   const { text, tone = "professional", maxLength = 500 } = input;
 
-  if (process.env.GEMINI_API_KEY) {
+  if (process.env.OPENAI_API_KEY) {
     try {
-      const prompt = `You are a professional content editor. Rewrite the given text in a ${tone} tone. Keep it under ${maxLength} characters. Return only the rewritten text.\n\nText: ${text}`;
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { maxOutputTokens: 400, temperature: 0.7 },
-          }),
-        }
-      );
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o",
+          messages: [
+            {
+              role: "system",
+              content: `You are a professional content editor. Rewrite the given text in a ${tone} tone. Keep it under ${maxLength} characters. Return only the rewritten text.`,
+            },
+            { role: "user", content: text },
+          ],
+          max_tokens: 400,
+          temperature: 0.7,
+        }),
+      });
 
-      if (!res.ok) throw new Error(`Gemini: ${res.status}`);
+      if (!res.ok) throw new Error(`OpenAI: ${res.status}`);
       const data = await res.json();
-      const rewritten =
-        data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || text;
+      const rewritten = data.choices?.[0]?.message?.content?.trim() || text;
 
       return {
         original: text,
@@ -182,7 +206,7 @@ export async function executeStacksScout(input: StacksScoutInput) {
     if (metrics.includes("transactions")) {
       const res = await fetch(`${hiroApi}/extended/v1/tx?limit=1`, { headers });
       if (res.ok) {
-        const data = await res.json();
+        const data = (await res.json()) as HiroTxListResponse;
         result.transactions = {
           total: data.total || 0,
           recent_count: data.results?.length || 0,
@@ -195,9 +219,11 @@ export async function executeStacksScout(input: StacksScoutInput) {
       // approximate from recent unique senders
       const res = await fetch(`${hiroApi}/extended/v1/tx?limit=50`, { headers });
       if (res.ok) {
-        const data = await res.json();
+        const data = (await res.json()) as HiroTxListResponse;
         const uniqueSenders = new Set(
-          (data.results || []).map((tx: any) => tx.sender_address)
+          (data.results || [])
+            .map((tx) => tx.sender_address)
+            .filter((sender): sender is string => Boolean(sender))
         );
         result.active_wallets = {
           recent_unique_senders: uniqueSenders.size,
@@ -231,29 +257,32 @@ interface ProfileProInput {
 export async function executeProfilePro(input: ProfileProInput) {
   const { profileUrl, analysisDepth = "standard" } = input;
 
-  if (process.env.GEMINI_API_KEY) {
+  if (process.env.OPENAI_API_KEY) {
     try {
-      const prompt = `You are a social media analyst. Analyze the given profile URL and provide a ${analysisDepth} audit.\nReturn ONLY a valid JSON object with these fields: profile (object with username and platform), score (number 0-100), strengths (string array), weaknesses (string array), suggestions (string array).\n\nProfile URL: ${profileUrl}`;
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: {
-              maxOutputTokens: 600,
-              temperature: 0.7,
-              responseMimeType: "application/json",
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o",
+          messages: [
+            {
+              role: "system",
+              content: `You are a social media analyst. Analyze the given profile URL and provide a ${analysisDepth} audit. Return JSON with: profile (username, platform), score (0-100), strengths (array), weaknesses (array), suggestions (array). Only return valid JSON.`,
             },
-          }),
-        }
-      );
+            { role: "user", content: `Analyze this profile: ${profileUrl}` },
+          ],
+          max_tokens: 600,
+          temperature: 0.7,
+          response_format: { type: "json_object" },
+        }),
+      });
 
-      if (!res.ok) throw new Error(`Gemini: ${res.status}`);
+      if (!res.ok) throw new Error(`OpenAI: ${res.status}`);
       const data = await res.json();
-      const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-      const analysis = JSON.parse(raw);
+      const analysis = JSON.parse(data.choices?.[0]?.message?.content || "{}");
       return { ...analysis, analysis_depth: analysisDepth };
     } catch {
       // Fall through to demo

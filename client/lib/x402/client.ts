@@ -138,6 +138,7 @@ export async function executeSkillWithPayment<T = unknown>(opts: {
 
   // 3. Broadcasting / confirming (facilitator handles this)
   onStateChange?.("broadcasting");
+  onStateChange?.("confirming");
 
   // 4. Execute
   onStateChange?.("executing");
